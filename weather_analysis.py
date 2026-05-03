@@ -52,7 +52,7 @@ def fetch_weather(start="2017-01-01", end=None):
         ]),
         "timezone": "Asia/Kolkata",
     }
-    r = requests.get(url, params=params, timeout=60)
+    r = requests.get(url, params=params, timeout=120)
     r.raise_for_status()
     data = r.json()
     daily = data["daily"]
