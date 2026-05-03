@@ -1,0 +1,13 @@
+garlic.duckdb
+garlic_raw_responses/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.egg-info/
+.env
+venv/
+.venv/
+weather_jaora.csv
+garlic_complete_data.csv
+backtest_results.csv

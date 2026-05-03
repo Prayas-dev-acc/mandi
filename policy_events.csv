@@ -1,0 +1,30 @@
+date,event_type,description,price_impact
+2017-06-01,export,India garlic export season opens — MP harvest fully arrived,neutral
+2018-01-01,supply,National garlic glut — farmers over-planted post-2017 prices,bearish
+2018-05-01,supply,Desi garlic flood from MP/Gujarat — prices crash to ₹500/Q,very_bearish
+2019-03-01,weather,Unseasonal rain in MP Mar-Apr 2019 — standing crop damaged in patches,bullish
+2019-09-01,export,China restricts garlic exports — India fills global demand gap,very_bullish
+2019-10-01,supply,Global garlic shortage — Indian exporters buying aggressively,very_bullish
+2020-03-24,policy,"COVID-19 Nationwide Lockdown — mandis shut, arrivals collapse",mixed
+2020-04-15,policy,Partial mandi reopening — farmers dump stock in fear,bearish
+2020-07-01,export,Export demand recovers post-COVID — prices stabilise,bullish
+2021-01-01,supply,Good rabi crop 2020-21 — arrivals recover,neutral
+2021-10-01,export,Strong export demand from SE Asia and Europe,bullish
+2022-01-01,supply,Large MP crop — wet sowing 2021 led to bumper harvest,bearish
+2022-06-01,policy,Government imposes stock limits on garlic (Essential Commodities Act),bearish
+2022-09-01,supply,Prices fall despite storage season — excess carry-over stock,very_bearish
+2023-03-01,weather,Unseasonal rain Mar 2023 — Mandsaur/Neemuch crop partly damaged,bullish
+2023-06-01,export,China garlic crop shortfall — India becomes key supplier,very_bullish
+2023-09-01,export,APEDA reports record garlic export enquiries,very_bullish
+2023-11-01,supply,"Cold storage stock running out — prices spike to ₹15,000+",very_bullish
+2024-01-01,supply,Very low carry-in stock + strong export demand — prices hit records,very_bullish
+2024-03-01,policy,Government monitors garlic prices amid retail inflation concerns,bearish_risk
+2024-05-01,export,MEP on garlic under discussion — export curb fear,bearish_risk
+2024-08-01,supply,"Cold storage rapidly depleting — prices reach ₹30,000+/Q",very_bullish
+2024-11-01,supply,New kharif arrivals begin — price starts correcting from peak,bearish
+2025-01-01,supply,Fresh rabi 2024-25 crop arrives early — big supply surge expected,bearish
+2025-02-01,supply,Arrivals spike at Jaora/Mandsaur — harvest price crashes 66%,very_bearish
+2025-06-01,export,"Export demand weak — China harvest normal, no India demand premium",bearish
+2025-10-01,supply,Sowing 2025 excellent (122mm rain) but area planted may be low post-crash,neutral
+2026-01-01,supply,Low 2026 arrivals confirm farmers reduced planting after 2025 crash,bullish
+2026-04-01,export,2026 export season opens — watch for China crop update,watch

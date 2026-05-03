@@ -1,0 +1,10 @@
+year,sow_rain_mm,frost_days,harv_rain_mm,harv_heavy_days,stor_avg_temp,total_arrivals,arr_change_pct,harvest_price,storage_price,annual_price,outcome,weather_drivers
+2018,1.0,0,6.9,0,28.0,831529.0,148.0,1306.0,1155.0,1217.0,CRASH,DRY SOWING → poor germination → low area planted
+2019,0.0,1,16.4,1,28.2,487854.0,-41.0,3084.0,6670.0,5493.0,GOOD,DRY SOWING → poor germination → low area planted | FROST 1d → bulb damage → quality/yield loss | MODERATE HARVEST RAIN 16mm → quality downgrade
+2020,75.0,0,4.7,0,28.6,219211.0,-55.0,4436.0,6604.0,6199.0,GOOD,NORMAL SEASON — no major stress signals
+2021,16.0,0,1.0,0,27.5,456571.0,108.0,4505.0,4660.0,4534.0,AVERAGE,NORMAL SEASON — no major stress signals
+2022,73.0,1,5.4,0,28.2,635675.0,39.0,2971.0,2429.0,2460.0,CRASH,FROST 1d → bulb damage → quality/yield loss
+2023,73.0,0,20.7,1,27.8,534659.0,-16.0,4348.0,8242.0,6862.0,GOOD,MODERATE HARVEST RAIN 21mm → quality downgrade
+2024,41.0,0,6.6,0,28.7,227742.0,-57.0,8387.0,17739.0,14356.0,BOOM,NORMAL SEASON — no major stress signals
+2025,15.0,0,0.0,0,27.5,284107.0,25.0,4337.0,3758.0,4929.0,AVERAGE,NORMAL SEASON — no major stress signals
+2026,122.0,0,6.3,0,32.0,89589.0,-68.0,5104.0,,6034.0,GOOD,WET SOWING → excellent germination → large area | HOT STORAGE SEASON → fast stock depletion → price spike

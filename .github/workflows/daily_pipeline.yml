@@ -1,0 +1,74 @@
+name: Daily Garlic Intelligence Update
+
+on:
+  schedule:
+    - cron: '30 0 * * *'   # 6:00 AM IST (UTC+5:30) = 00:30 UTC
+  workflow_dispatch:        # manual trigger from GitHub UI
+
+permissions:
+  contents: write           # needed to commit report.html back to repo
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download latest database from Releases
+        run: |
+          gh release download latest --pattern "garlic.duckdb" --output garlic.duckdb \
+            && echo "Downloaded garlic.duckdb from latest release" \
+            || echo "WARNING: No previous release found — pipeline will still run with empty DB"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Run daily pipeline
+        run: python pipeline.py --ci
+        env:
+          CI: "true"
+
+      - name: Upload updated database as GitHub Release
+        run: |
+          TAG="db-$(date +%Y%m%d)"
+          # Delete old release if it exists (keep only last 7 days to save space)
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          gh release create "$TAG" garlic.duckdb \
+            --title "Database $TAG" \
+            --notes "Auto-updated by daily pipeline" \
+            --latest
+          # Clean up releases older than 7 days
+          gh release list --limit 20 --json tagName,createdAt \
+            | python3 -c "
+import json, sys
+from datetime import datetime, timedelta, timezone
+cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+for r in json.load(sys.stdin):
+    created = datetime.fromisoformat(r['createdAt'].replace('Z','+00:00'))
+    if created < cutoff and r['tagName'].startswith('db-'):
+        print(r['tagName'])
+" | xargs -I{} gh release delete {} --yes 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit updated report + accuracy log
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add report.html accuracy_log.csv accuracy_summary.json price_forecast.csv \
+                  weather_monthly.csv 2>/dev/null || true
+          git diff --cached --quiet \
+            || git commit -m "Auto-update $(date +%Y-%m-%d): prices + forecast + report"
+          git push
