@@ -31,9 +31,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release download latest --pattern "garlic.duckdb" --output garlic.duckdb \
-            && echo "DB downloaded" \
-            || echo "No previous DB found, starting fresh"
+          gh release download --pattern "garlic.duckdb" --output garlic.duckdb \
+            && echo "DB downloaded ($(du -sh garlic.duckdb | cut -f1))" \
+            || echo "No previous release found — starting fresh"
 
       - name: Run daily pipeline
         env:

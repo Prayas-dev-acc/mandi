@@ -33,15 +33,25 @@ def log(msg): print(msg, flush=True)
 
 def get_missing_dates(lookback_days=14):
     """Return dates not yet in the DB, going back lookback_days from yesterday."""
-    con = duckdb.connect(DB_PATH, read_only=True)
-    existing = {
-        row[0].strftime("%Y-%m-%d")
-        for row in con.execute("SELECT DISTINCT date FROM garlic_prices").fetchall()
-    }
-    con.close()
     yesterday = date.today() - timedelta(days=1)
     start     = yesterday - timedelta(days=lookback_days)
-    missing   = []
+
+    if not Path(DB_PATH).exists():
+        log(f"daily_fetch: DB not found — will fetch all {lookback_days} days")
+        return [start + timedelta(days=i) for i in range(lookback_days + 1)]
+
+    try:
+        con = duckdb.connect(DB_PATH, read_only=True)
+        existing = {
+            row[0].strftime("%Y-%m-%d")
+            for row in con.execute("SELECT DISTINCT date FROM garlic_prices").fetchall()
+        }
+        con.close()
+    except Exception as e:
+        log(f"daily_fetch: could not read existing dates ({e}) — fetching all")
+        return [start + timedelta(days=i) for i in range(lookback_days + 1)]
+
+    missing = []
     cur = start
     while cur <= yesterday:
         if cur.strftime("%Y-%m-%d") not in existing:
@@ -101,9 +111,28 @@ def _extract_rows(data, date_str):
     return rows
 
 
+def _ensure_schema(con):
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS garlic_prices (
+            date DATE, state_id INTEGER, state_name VARCHAR,
+            market_id INTEGER, market_name VARCHAR,
+            variety VARCHAR, grade VARCHAR,
+            arrivals DOUBLE, unit_arrivals VARCHAR,
+            min_price DOUBLE, max_price DOUBLE, modal_price DOUBLE,
+            unit_price VARCHAR, source VARCHAR
+        )
+    """)
+    con.execute("""
+        CREATE VIEW IF NOT EXISTS clean_garlic_prices AS
+        SELECT date, market_id, market_name, state_name, modal_price, arrivals
+        FROM garlic_prices WHERE modal_price > 0 AND arrivals > 0
+    """)
+
+
 def load_rows(rows):
     if not rows: return 0
     con = duckdb.connect(DB_PATH)
+    _ensure_schema(con)
     existing = {
         r[0].strftime("%Y-%m-%d")
         for r in con.execute("SELECT DISTINCT date FROM garlic_prices").fetchall()
