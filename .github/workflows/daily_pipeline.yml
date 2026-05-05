@@ -58,5 +58,6 @@ jobs:
           git add report.html accuracy_log.csv accuracy_summary.json \
                   price_forecast.csv weather_monthly.csv || true
           git diff --cached --quiet \
+            && git commit --allow-empty -m "Auto-update $(date +%Y-%m-%d) [data-refresh]" \
             || git commit -m "Auto-update $(date +%Y-%m-%d)"
           git push
