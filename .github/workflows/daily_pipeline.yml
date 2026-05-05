@@ -55,7 +55,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add report.html accuracy_log.csv accuracy_summary.json \
+          git add index.html accuracy_log.csv accuracy_summary.json \
                   price_forecast.csv weather_monthly.csv || true
           git diff --cached --quiet \
             && git commit --allow-empty -m "Auto-update $(date +%Y-%m-%d) [data-refresh]" \

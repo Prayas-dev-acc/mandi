@@ -1,256 +1,4 @@
-#!/usr/bin/env python3
-"""
-Generate report.html — self-contained market intelligence dashboard.
-Run: python3 generate_report.py  →  opens report.html in browser.
-"""
-import duckdb, json, webbrowser, os
-import numpy as np
-import pandas as pd
-from datetime import date
-from pathlib import Path
-from crop_stress import run_crop_stress_check
-
-DB_PATH       = "garlic.duckdb"
-JAORA_CLUSTER = [1085, 522, 182, 2336, 2088, 2111, 2662, 2082, 2727]
-CLUSTER_SQL   = ",".join(str(x) for x in JAORA_CLUSTER)
-OUT_PATH      = Path("index.html")
-
-
-# ── data loaders ─────────────────────────────────────────────────────
-
-def india_area():
-    data = [
-        (2016,310,1580),(2017,321,1693),(2018,303,1611),(2019,358,2910),
-        (2020,363,2925),(2021,386,3190),(2022,408,3208),(2023,431,3240),
-        (2024,390,2800),(2025,465,3650),(2026,440,3400),
-    ]
-    return pd.DataFrame(data, columns=["crop_year","area_kha","prod_kmt"])
-
-def load_data():
-    con = duckdb.connect(DB_PATH, read_only=True)
-
-    hist = con.execute(f"""
-        SELECT DATE_TRUNC('month', date)::DATE as month,
-               ROUND(AVG(modal_price),0) as price,
-               ROUND(SUM(arrivals),0)    as arrivals
-        FROM clean_garlic_prices
-        WHERE market_id IN ({CLUSTER_SQL})
-        GROUP BY 1 ORDER BY 1 DESC LIMIT 24
-    """).fetchdf()
-    hist["month"] = pd.to_datetime(hist["month"])
-    hist = hist.sort_values("month").reset_index(drop=True)
-
-    seasonal = con.execute(f"""
-        SELECT MONTH(date) as mo,
-               ROUND(AVG(modal_price),0)  as avg_price,
-               ROUND(AVG(arrivals),0)     as avg_arr
-        FROM clean_garlic_prices
-        WHERE market_id IN ({CLUSTER_SQL})
-        GROUP BY 1 ORDER BY 1
-    """).fetchdf()
-
-    yearly = con.execute(f"""
-        SELECT YEAR(date) as yr,
-               ROUND(AVG(modal_price),0)                                    as yr_avg,
-               ROUND(AVG(modal_price) FILTER (WHERE MONTH(date) IN (3,4)),0) as harv_price,
-               ROUND(AVG(modal_price) FILTER (WHERE MONTH(date) IN (7,8,9)),0) as stor_price
-        FROM clean_garlic_prices WHERE market_id IN ({CLUSTER_SQL})
-        GROUP BY 1 ORDER BY 1
-    """).fetchdf()
-
-    db_start = con.execute("SELECT YEAR(MIN(date)) FROM garlic_prices").fetchone()[0]
-    con.close()
-
-    forecast = pd.read_csv("price_forecast.csv") if Path("price_forecast.csv").exists() else pd.DataFrame()
-
-    ds = pd.read_csv("demand_supply_features.csv") if Path("demand_supply_features.csv").exists() else pd.DataFrame()
-    if not ds.empty:
-        ds["month"] = pd.to_datetime(ds["month"])
-
-    china = pd.read_csv("china_garlic_comtrade.csv") if Path("china_garlic_comtrade.csv").exists() else pd.DataFrame()
-
-    return hist, seasonal, yearly, forecast, ds, china, db_start
-
-
-def load_weather_signals():
-    try:
-        w = pd.read_csv("weather_monthly.csv")
-        w["month"] = pd.to_datetime(w["ym"].astype(str)).dt.to_period("M").dt.to_timestamp()
-        w["yr"] = w["month"].dt.year; w["mo"] = w["month"].dt.month
-        oct_row  = w[(w["yr"] == 2025) & (w["mo"] == 10)]
-        sow_rain = float(oct_row["total_rain_mm"].values[0]) if len(oct_row) else 0.0
-        oct_hist = w[w["mo"] == 10]["total_rain_mm"].mean()
-        feb_row  = w[(w["yr"] == 2026) & (w["mo"] == 2)]
-        feb_sm   = float(feb_row["avg_soil_moisture"].values[0]) if len(feb_row) else 0.0
-        feb_hist = w[w["mo"] == 2]["avg_soil_moisture"].mean()
-        return {"sow_rain": sow_rain, "sow_hist": oct_hist,
-                "feb_sm": feb_sm, "feb_sm_hist": feb_hist}
-    except Exception:
-        return {}
-
-
-def compute_spike_risk(hist, ds, china, area_df):
-    area_10yr = area_df["area_kha"].mean()
-    area_cur  = 440; area_prev = 465; prod_cur = 3400; prod_10yr = area_df["prod_kmt"].mean()
-    area_diff = (area_cur - area_10yr) / area_10yr * 100
-    prod_diff = (prod_cur - prod_10yr) / prod_10yr * 100
-    area_yoy  = (area_cur - area_prev) / area_prev * 100
-
-    last_price = int(hist.iloc[-1]["price"])
-    peak_price = int(hist["price"].max())
-
-    # Harvest season arrivals (Dec 2025–May 2026 vs Dec 2024–May 2025)
-    harv_2026 = 99836; harv_2025 = 166834
-    arr_yoy   = (harv_2026 - harv_2025) / harv_2025 * 100
-
-    weather = load_weather_signals()
-
-    score = 3.0
-    # Paper supply
-    if area_diff > 15:  score -= 1.0
-    elif area_diff > 8: score -= 0.5
-    if prod_diff > 20:  score -= 1.0
-    elif prod_diff > 10: score -= 0.5
-    # Arrivals shortfall (real supply signal)
-    if arr_yoy < -35:   score += 1.5
-    elif arr_yoy < -20: score += 1.0
-    # Weather damage
-    if weather:
-        sow_ratio = weather["sow_rain"] / max(weather["sow_hist"], 1)
-        if sow_ratio > 5:   score += 1.0
-        elif sow_ratio > 2: score += 0.5
-        sm_ratio = weather["feb_sm"] / max(weather["feb_sm_hist"], 0.01)
-        if sm_ratio > 1.1:  score += 0.5
-    # Post-spike
-    if last_price / peak_price < 0.35:  score -= 1.0
-    elif last_price / peak_price < 0.55: score -= 0.5
-    if area_yoy < -10: score += 1.0
-    elif area_yoy < -5: score += 0.5
-
-    cur_spread = None; cur_kerala = None; china_fob = None
-    if not ds.empty and "south_spread" in ds.columns:
-        ss = ds["south_spread"].dropna()
-        cur_spread = float(ss.iloc[-1])
-        baseline   = ss.iloc[-12:-1].median() if len(ss) >= 12 else ss.median()
-        if baseline > 0 and cur_spread / baseline > 1.2: score += 0.5
-        cur_kerala = float(ds["kerala_price"].dropna().iloc[-1]) if "kerala_price" in ds.columns else None
-    if not china.empty and "china_fob_per_kg" in china.columns:
-        cv = china["china_fob_per_kg"].dropna()
-        china_fob = float(cv.iloc[-1])
-        if china_fob / float(cv.iloc[:-1].mean()) > 1.25: score += 0.5
-
-    star = max(1, min(5, round(score)))
-    risk_label = {1:"VERY LOW",2:"LOW",3:"MODERATE",4:"HIGH",5:"CRITICAL"}[star]
-
-    # Build signal list — arrivals + weather first (most important)
-    signals = [
-        {"label": "Arrivals Dec '25–May '26 vs prior yr",
-         "value": f"{harv_2026:,} MT",
-         "flag": "alert" if arr_yoy < -30 else "watch",
-         "note": f"{arr_yoy:+.0f}% vs last year ({harv_2025:,} MT) — real supply signal"},
-    ]
-    if weather:
-        sr = weather["sow_rain"]; sh = weather["sow_hist"]
-        signals.append({"label": "Oct 2025 sowing rain",
-                        "value": f"{sr:.0f} mm",
-                        "flag": "alert" if sr > 5*sh else "watch",
-                        "note": f"Hist avg {sh:.0f}mm — waterlogging → uneven germination, yield loss"})
-        sm = weather["feb_sm"]; smh = weather["feb_sm_hist"]
-        signals.append({"label": "Feb 2026 soil moisture",
-                        "value": f"{sm:.3f}",
-                        "flag": "watch" if sm > smh * 1.1 else "neutral",
-                        "note": f"Hist avg {smh:.3f} — wet bulb-fill → fungal disease risk"})
-    signals += [
-        {"label": "India sowing area 2026 (est)",
-         "value": f"{int(area_cur):,}k ha",
-         "flag": "low" if area_diff > 8 else "neutral",
-         "note": f"{area_diff:+.0f}% vs 10yr avg — paper supply ample, doesn't reflect crop damage"},
-        {"label": "Price vs recent peak",
-         "value": f"₹{last_price:,} / ₹{peak_price:,}",
-         "flag": "neutral",
-         "note": f"Down {(1-last_price/peak_price)*100:.0f}% from peak — normalization phase"},
-    ]
-    if cur_spread:
-        signals.append({"label":"South spread (Kerala–Jaora)",
-                        "value":f"₹{int(cur_spread):,}/q",
-                        "flag":"neutral",
-                        "note":f"Kerala ₹{int(cur_kerala):,} — strong demand pull" if cur_kerala else "Demand pull from south"})
-    if china_fob:
-        signals.append({"label":"China FOB export price",
-                        "value":f"${china_fob:.2f}/kg",
-                        "flag":"watch" if china_fob > 1.2 else "neutral",
-                        "note":"High China price → more export demand for Indian garlic"})
-
-    return star, risk_label, signals
-
-
-def build_chart_data(hist, forecast):
-    hist_labels  = [r["month"].strftime("%b %y") for _, r in hist.iterrows()]
-    hist_prices  = [int(r["price"]) for _, r in hist.iterrows()]
-    hist_arrivals = [int(r["arrivals"]) for _, r in hist.iterrows()]
-
-    fcast_labels = []
-    fcast_mid    = []
-    fcast_low    = []
-    fcast_high   = []
-    if not forecast.empty:
-        for _, r in forecast.iterrows():
-            fcast_labels.append(r["month"])
-            fcast_mid.append(int(r["pred_price"]))
-            fcast_low.append(int(r["price_low"]))
-            fcast_high.append(int(r["price_high"]))
-
-    return {
-        "hist_labels":   hist_labels,
-        "hist_prices":   hist_prices,
-        "hist_arrivals": hist_arrivals,
-        "fcast_labels":  fcast_labels,
-        "fcast_mid":     fcast_mid,
-        "fcast_low":     fcast_low,
-        "fcast_high":    fcast_high,
-    }
-
-
-def build_seasonal_data(seasonal, today_month=None):
-    months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-    s = seasonal.set_index("mo")
-    prices = [int(s.loc[i+1,"avg_price"]) if (i+1) in s.index else 0 for i in range(12)]
-    arrs   = [int(s.loc[i+1,"avg_arr"])   if (i+1) in s.index else 0 for i in range(12)]
-    # correct phases by Jan-indexed month (0=Jan … 11=Dec)
-    phases_jan = ["GROWING","GROWING","HARVEST","HARVEST","HARVEST","STORAGE",
-                  "STORAGE","STORAGE","STORAGE","SOWING","SOWING","GROWING"]
-    # reorder to Oct–Sep cycle
-    order        = [9,10,11,0,1,2,3,4,5,6,7,8]
-    cycle_months = [10,11,12,1,2,3,4,5,6,7,8,9]
-    labels = [months[i]      for i in order]
-    ph     = [phases_jan[i]  for i in order]
-    pr     = [prices[i]      for i in order]
-    ar     = [arrs[i]        for i in order]
-    today_idx = cycle_months.index(today_month) if today_month and today_month in cycle_months else -1
-    return {"labels": labels, "phases": ph, "prices": pr, "arrivals": ar, "today_month_idx": today_idx}
-
-
-def analog_years(yearly):
-    analogs = [2017,2018,2020,2022,2025]
-    ctx = {
-        2017:"After 2016 record premium (+150%) — glut followed",
-        2018:"Continued oversupply — worst storage year on record",
-        2020:"COVID disruption — storage still +49% (exception)",
-        2022:"Bumper after stable 2021; storage flat",
-        2025:"Crash from 2024 spike; record sowing → storage −14%",
-    }
-    rows = []
-    for _, r in yearly[yearly["yr"].isin(analogs)].iterrows():
-        h = int(r["harv_price"]) if pd.notna(r["harv_price"]) else None
-        s = int(r["stor_price"]) if pd.notna(r["stor_price"]) else None
-        gain = round((s-h)/h*100) if h and s else None
-        rows.append({"yr":int(r["yr"]),"harv":h,"stor":s,"gain":gain,"ctx":ctx.get(int(r["yr"]),"")})
-    return rows
-
-
-# ── HTML template ─────────────────────────────────────────────────────
-
-HTML = """<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -405,7 +153,7 @@ HTML = """<!DOCTYPE html>
   </div>
   <div style="text-align:right">
     <div class="badge">v1 REPORT</div>
-    <div style="color:var(--muted);font-size:11px;margin-top:6px">__DATE__</div>
+    <div style="color:var(--muted);font-size:11px;margin-top:6px">06 May 2026</div>
   </div>
 </div>
 
@@ -415,17 +163,17 @@ HTML = """<!DOCTYPE html>
   <div class="grid3">
     <div class="card">
       <div class="card-title">Current Price</div>
-      <div class="kpi-value">₹__PRICE__</div>
+      <div class="kpi-value">₹5,260</div>
       <div class="kpi-sub">per quintal — Jaora cluster</div>
-      <div class="kpi-change __MOM_CLASS__">__MOM__% vs last month</div>
+      <div class="kpi-change up">+18.4% vs last month</div>
       <div style="margin-top:8px;font-size:11px;color:var(--muted)">
-        Year-on-year: <span style="color:var(--text)">__YOY__% vs May '25</span>
+        Year-on-year: <span style="color:var(--text)">+7.2% vs May '25</span>
       </div>
     </div>
     <div class="card">
       <div class="card-title">Spike Risk Indicator</div>
-      <div class="stars">__STARS__</div>
-      <div class="risk-label __RISK_CLASS__">__RISK_LABEL__</div>
+      <div class="stars">★★★★☆</div>
+      <div class="risk-label risk-high">HIGH</div>
       <div style="font-size:12px;color:var(--muted);line-height:1.5">
         Area data says supply ample, but actual mandi arrivals
         (Dec 2025–May 2026) are 40% below prior season.
@@ -436,17 +184,17 @@ HTML = """<!DOCTYPE html>
       <div style="margin-top:4px">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
           <span style="color:var(--muted);font-size:12px">Jun 2026</span>
-          <span style="font-weight:600">₹__FC0__</span>
+          <span style="font-weight:600">₹4,974</span>
           <span class="kpi-change nt">→ FLAT</span>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
           <span style="color:var(--muted);font-size:12px">Aug 2026</span>
-          <span style="font-weight:600">₹__FC2__</span>
+          <span style="font-weight:600">₹4,250</span>
           <span class="kpi-change dn">↓ SELL</span>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
           <span style="color:var(--muted);font-size:12px">Nov 2026</span>
-          <span style="font-weight:600">₹__FC5__</span>
+          <span style="font-weight:600">₹3,470</span>
           <span class="kpi-change dn">↓ SELL</span>
         </div>
       </div>
@@ -601,19 +349,19 @@ HTML = """<!DOCTYPE html>
 
 <!-- FOOTER -->
 <div class="footer">
-  Data: <span>Agmarknet __DBSTART__–present</span> · NHB area &amp; production ·
+  Data: <span>Agmarknet 2010–present</span> · NHB area &amp; production ·
   Open-Meteo weather · Ensemble ML (ElasticNet + XGBoost) · auto-retrained daily
   <br><span id="accuracyNote" style="display:inline-block;margin-top:4px">Accuracy: loading...</span>
 </div>
 
 <script>
-const D = __CHART_DATA__;
-const SEASONAL = __SEASONAL_DATA__;
-const SIGNALS = __SIGNALS__;
-const ANALOGS = __ANALOGS__;
-const FCAST = __FCAST_TABLE__;
-const STRESS = __STRESS_ALERTS__;
-const ACCURACY = __ACCURACY__;
+const D = {"hist_labels": ["Jun 24", "Jul 24", "Aug 24", "Sep 24", "Oct 24", "Nov 24", "Dec 24", "Jan 25", "Feb 25", "Mar 25", "Apr 25", "May 25", "Jun 25", "Jul 25", "Aug 25", "Sep 25", "Oct 25", "Nov 25", "Dec 25", "Jan 26", "Feb 26", "Mar 26", "Apr 26", "May 26"], "hist_prices": [11337, 12651, 17323, 19560, 21533, 23176, 18756, 11844, 5810, 4621, 3590, 4905, 4471, 3644, 3971, 3138, 3200, 3196, 5256, 7798, 6393, 5234, 4444, 5260], "hist_arrivals": [19246, 21514, 20680, 14904, 13709, 11481, 9499, 18389, 46318, 41507, 26644, 24477, 17997, 19954, 17978, 25871, 15882, 18843, 10247, 13276, 31546, 17842, 26288, 637], "fcast_labels": ["2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"], "fcast_mid": [4974, 4602, 4250, 4132, 3490, 3470], "fcast_low": [4836, 4380, 4245, 3911, 3473, 3337], "fcast_high": [5093, 4619, 4255, 4299, 3900, 3641]};
+const SEASONAL = {"labels": ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"], "phases": ["SOWING", "SOWING", "GROWING", "GROWING", "GROWING", "HARVEST", "HARVEST", "HARVEST", "STORAGE", "STORAGE", "STORAGE", "STORAGE"], "prices": [7535, 7843, 7243, 6608, 5076, 3938, 3997, 4655, 5243, 5501, 6631, 6602], "arrivals": [275, 308, 266, 253, 360, 403, 365, 287, 230, 262, 279, 302], "today_month_idx": 7};
+const SIGNALS = [{"label": "Arrivals Dec '25\u2013May '26 vs prior yr", "value": "99,836 MT", "flag": "alert", "note": "-40% vs last year (166,834 MT) \u2014 real supply signal"}, {"label": "Oct 2025 sowing rain", "value": "119 mm", "flag": "watch", "note": "Hist avg 27mm \u2014 waterlogging \u2192 uneven germination, yield loss"}, {"label": "Feb 2026 soil moisture", "value": "0.308", "flag": "watch", "note": "Hist avg 0.271 \u2014 wet bulb-fill \u2192 fungal disease risk"}, {"label": "India sowing area 2026 (est)", "value": "440k ha", "flag": "low", "note": "+16% vs 10yr avg \u2014 paper supply ample, doesn't reflect crop damage"}, {"label": "Price vs recent peak", "value": "\u20b95,260 / \u20b923,176", "flag": "neutral", "note": "Down 77% from peak \u2014 normalization phase"}, {"label": "South spread (Kerala\u2013Jaora)", "value": "\u20b99,830/q", "flag": "neutral", "note": "Kerala \u20b915,600 \u2014 strong demand pull"}, {"label": "China FOB export price", "value": "$1.34/kg", "flag": "watch", "note": "High China price \u2192 more export demand for Indian garlic"}];
+const ANALOGS = [{"yr": 2017, "harv": 3307, "stor": 2555, "gain": -23, "ctx": "After 2016 record premium (+150%) \u2014 glut followed"}, {"yr": 2018, "harv": 1483, "stor": 1214, "gain": -18, "ctx": "Continued oversupply \u2014 worst storage year on record"}, {"yr": 2020, "harv": 4380, "stor": 6522, "gain": 49, "ctx": "COVID disruption \u2014 storage still +49% (exception)"}, {"yr": 2022, "harv": 2735, "stor": 2596, "gain": -5, "ctx": "Bumper after stable 2021; storage flat"}, {"yr": 2025, "harv": 4149, "stor": 3579, "gain": -14, "ctx": "Crash from 2024 spike; record sowing \u2192 storage \u221214%"}];
+const FCAST = [{"month": "2026-06", "pred": 4974, "low": 4836, "high": 5093, "phase": "STORAGE", "chg": -5.4}, {"month": "2026-07", "pred": 4602, "low": 4380, "high": 4619, "phase": "STORAGE", "chg": -7.5}, {"month": "2026-08", "pred": 4250, "low": 4245, "high": 4255, "phase": "STORAGE", "chg": -7.6}, {"month": "2026-09", "pred": 4132, "low": 3911, "high": 4299, "phase": "STORAGE", "chg": -2.8}, {"month": "2026-10", "pred": 3490, "low": 3473, "high": 3900, "phase": "SOWING", "chg": -15.5}, {"month": "2026-11", "pred": 3470, "low": 3337, "high": 3641, "phase": "SOWING", "chg": -0.6}];
+const STRESS = [{"level": "ALERT", "phase": "SUPPLY", "metric": "Harvest arrivals YoY", "actual": "99,836 MT", "baseline": "166,834 MT last yr", "message": "-40% vs last year \u2014 real supply significantly below estimates"}, {"level": "ALERT", "phase": "SUPPLY", "metric": "Arrivals vs 3yr avg", "actual": "99,836 MT", "baseline": "214,310 MT 3yr avg", "message": "-53% below 3yr avg \u2014 structural supply shortfall signal"}, {"level": "WATCH", "phase": "SOWING", "metric": "Oct rain", "actual": "119mm", "baseline": "27mm avg", "message": "119mm vs 27mm avg (4.4\u00d7) \u2014 above-normal sowing rain, monitor germination"}, {"level": "WATCH", "phase": "GROWING", "metric": "Feb soil moisture", "actual": "0.308", "baseline": "0.271 avg", "message": "0.308 vs 0.271 avg (1.14\u00d7) \u2014 above-normal moisture, watch for purple blotch / white rot"}];
+const ACCURACY = {"status": "no_data", "n_months_scored": 0, "calibration_note": "Model running \u2014 accuracy tracking starts after first full month."};
 
 // ── Model Accuracy Badge (self-learning) ───────────────────────────
 if (ACCURACY && ACCURACY.n_months_scored > 0) {
@@ -921,92 +669,3 @@ ANALOGS.forEach(r => {
 </script>
 </body>
 </html>
-"""
-
-# ── main ─────────────────────────────────────────────────────────────
-
-def main():
-    hist, seasonal, yearly, forecast, ds, china, db_start = load_data()
-    area_df  = india_area()
-
-    # ── Run crop stress check (always, auto) ─────────────────────────
-    con2 = duckdb.connect(DB_PATH, read_only=True)
-    stress_alerts = run_crop_stress_check(con=con2, area_yoy_pct=-5.4, verbose=False)
-    con2.close()
-
-    star, risk_label, signals = compute_spike_risk(hist, ds, china, area_df)
-
-    last  = hist.iloc[-1]
-    prev  = hist.iloc[-2]
-    yr_ago = hist[hist["month"].dt.month == last["month"].month]
-    yr_ago = yr_ago.iloc[-2] if len(yr_ago) >= 2 else None
-
-    mom  = (last["price"] - prev["price"]) / prev["price"] * 100
-    yoy  = (last["price"] - yr_ago["price"]) / yr_ago["price"] * 100 if yr_ago is not None else 0
-    mom_class = "up" if mom > 0 else "dn"
-
-    stars_html = "★" * star + "☆" * (5 - star)
-    risk_cls   = {"VERY LOW":"risk-low","LOW":"risk-low","MODERATE":"risk-mod",
-                  "HIGH":"risk-high","CRITICAL":"risk-high"}.get(risk_label,"risk-mod")
-
-    # forecast rows for JS
-    fcast_rows = []
-    prev_p = float(last["price"])
-    for _, r in forecast.iterrows():
-        p = int(r["pred_price"])
-        chg = (p - prev_p) / prev_p * 100
-        fcast_rows.append({"month": r["month"], "pred": p,
-                           "low": int(r["price_low"]), "high": int(r["price_high"]),
-                           "phase": r["season"], "chg": round(chg,1)})
-        prev_p = p
-
-    fc = [r["pred"] for r in fcast_rows]
-
-    chart_data    = build_chart_data(hist, forecast)
-    seasonal_data = build_seasonal_data(seasonal, today_month=date.today().month)
-    analog_data   = analog_years(yearly)
-
-    html = HTML.replace("__DATE__",       date.today().strftime("%d %b %Y"))
-    html = html.replace("__PRICE__",      f"{int(last['price']):,}")
-    html = html.replace("__MOM__",        f"{mom:+.1f}")
-    html = html.replace("__MOM_CLASS__",  mom_class)
-    html = html.replace("__YOY__",        f"{yoy:+.1f}")
-    html = html.replace("__STARS__",      stars_html)
-    html = html.replace("__RISK_LABEL__", risk_label)
-    html = html.replace("__RISK_CLASS__", risk_cls)
-    html = html.replace("__DBSTART__",    str(db_start))
-    html = html.replace("__FC0__",  f"{fc[0]:,}" if len(fc)>0 else "—")
-    html = html.replace("__FC2__",  f"{fc[2]:,}" if len(fc)>2 else "—")
-    html = html.replace("__FC5__",  f"{fc[5]:,}" if len(fc)>5 else "—")
-
-    html = html.replace("__CHART_DATA__",   json.dumps(chart_data))
-    html = html.replace("__SEASONAL_DATA__",json.dumps(seasonal_data))
-    html = html.replace("__SIGNALS__",      json.dumps(signals))
-    html = html.replace("__ANALOGS__",      json.dumps(analog_data))
-    html = html.replace("__FCAST_TABLE__",  json.dumps(fcast_rows))
-
-    stress_js = [{"level": a.level, "phase": a.phase,
-                  "metric": a.metric, "actual": a.actual,
-                  "baseline": a.baseline, "message": a.message}
-                 for a in stress_alerts]
-    html = html.replace("__STRESS_ALERTS__", json.dumps(stress_js))
-
-    # Accuracy summary (self-learning feedback loop)
-    accuracy_path = Path("accuracy_summary.json")
-    if accuracy_path.exists():
-        acc = json.loads(accuracy_path.read_text())
-    else:
-        acc = {"status": "no_data", "n_months_scored": 0,
-               "calibration_note": "Model running — accuracy tracking starts after first full month."}
-    html = html.replace("__ACCURACY__", json.dumps(acc))
-
-    OUT_PATH.write_text(html, encoding="utf-8")
-    print(f"Generated: {OUT_PATH.resolve()}")
-    import os
-    if os.environ.get("CI") or "--no-browser" in __import__("sys").argv:
-        return
-    webbrowser.open(f"file://{OUT_PATH.resolve()}")
-
-
-if __name__ == "__main__":
-    main()
