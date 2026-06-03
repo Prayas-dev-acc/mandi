@@ -1,0 +1,11 @@
+{
+  "as_of": "2026-06-03",
+  "n_months_scored": 1,
+  "mape_all": 21.1,
+  "mape_recent12": 21.1,
+  "mae_all": 1330.0,
+  "bias_rs": -1330.0,
+  "bias_recent": -1330.0,
+  "accuracy_trend": "degrading",
+  "calibration_note": "Model under-predicting by \u20b91330 recently. Actual prices may be higher than forecast."
+}

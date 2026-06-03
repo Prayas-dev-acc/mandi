@@ -1,0 +1,2 @@
+logged_date,target_month,predicted,actual,abs_error,pct_error,direction_correct
+2026-06-03,2026-06,4974.0,6304.0,1330.0,21.1,
