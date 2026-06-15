@@ -153,7 +153,7 @@
   </div>
   <div style="text-align:right">
     <div class="badge">v1 REPORT</div>
-    <div style="color:var(--muted);font-size:11px;margin-top:6px">14 Jun 2026</div>
+    <div style="color:var(--muted);font-size:11px;margin-top:6px">15 Jun 2026</div>
   </div>
 </div>
 
@@ -361,7 +361,7 @@ const SIGNALS = [{"label": "Arrivals Dec '25\u2013May '26 vs prior yr", "value":
 const ANALOGS = [{"yr": 2017, "harv": 3307, "stor": 2555, "gain": -23, "ctx": "After 2016 record premium (+150%) \u2014 glut followed"}, {"yr": 2018, "harv": 1483, "stor": 1214, "gain": -18, "ctx": "Continued oversupply \u2014 worst storage year on record"}, {"yr": 2020, "harv": 4380, "stor": 6522, "gain": 49, "ctx": "COVID disruption \u2014 storage still +49% (exception)"}, {"yr": 2022, "harv": 2735, "stor": 2596, "gain": -5, "ctx": "Bumper after stable 2021; storage flat"}, {"yr": 2025, "harv": 4149, "stor": 3579, "gain": -14, "ctx": "Crash from 2024 spike; record sowing \u2192 storage \u221214%"}];
 const FCAST = [{"month": "2026-06", "pred": 4974, "low": 4836, "high": 5093, "phase": "STORAGE", "chg": -28.5}, {"month": "2026-07", "pred": 4602, "low": 4380, "high": 4619, "phase": "STORAGE", "chg": -7.5}, {"month": "2026-08", "pred": 4250, "low": 4245, "high": 4255, "phase": "STORAGE", "chg": -7.6}, {"month": "2026-09", "pred": 4132, "low": 3911, "high": 4299, "phase": "STORAGE", "chg": -2.8}, {"month": "2026-10", "pred": 3490, "low": 3473, "high": 3900, "phase": "SOWING", "chg": -15.5}, {"month": "2026-11", "pred": 3470, "low": 3337, "high": 3641, "phase": "SOWING", "chg": -0.6}];
 const STRESS = [{"level": "ALERT", "phase": "SUPPLY", "metric": "Arrivals vs 3yr avg", "actual": "115,000 MT", "baseline": "214,310 MT 3yr avg", "message": "-46% below 3yr avg \u2014 structural supply shortfall signal"}, {"level": "WATCH", "phase": "SOWING", "metric": "Oct rain", "actual": "119mm", "baseline": "38mm avg", "message": "119mm vs 38mm avg (3.1\u00d7) \u2014 above-normal sowing rain, monitor germination"}, {"level": "WATCH", "phase": "GROWING", "metric": "Feb soil moisture", "actual": "0.308", "baseline": "0.273 avg", "message": "0.308 vs 0.273 avg (1.13\u00d7) \u2014 above-normal moisture, watch for purple blotch / white rot"}, {"level": "WATCH", "phase": "SUPPLY", "metric": "Harvest arrivals YoY", "actual": "115,000 MT", "baseline": "166,834 MT last yr", "message": "-31% vs last year \u2014 monitor storage season for tightness"}];
-const ACCURACY = {"as_of": "2026-06-14", "n_months_scored": 1, "mape_all": 21.1, "mape_recent12": 21.1, "mae_all": 1330.0, "bias_rs": -1330.0, "bias_recent": -1330.0, "accuracy_trend": "degrading", "calibration_note": "Model under-predicting by \u20b91330 recently. Actual prices may be higher than forecast."};
+const ACCURACY = {"as_of": "2026-06-15", "n_months_scored": 1, "mape_all": 21.1, "mape_recent12": 21.1, "mae_all": 1330.0, "bias_rs": -1330.0, "bias_recent": -1330.0, "accuracy_trend": "degrading", "calibration_note": "Model under-predicting by \u20b91330 recently. Actual prices may be higher than forecast."};
 
 // ── Model Accuracy Badge (self-learning) ───────────────────────────
 if (ACCURACY && ACCURACY.n_months_scored > 0) {
