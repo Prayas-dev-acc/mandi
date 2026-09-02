@@ -1,11 +1,11 @@
 {
-  "as_of": "2026-09-01",
-  "n_months_scored": 3,
-  "mape_all": 38.0,
-  "mape_recent12": 38.0,
-  "mae_all": 3003.0,
-  "bias_rs": -3003.0,
-  "bias_recent": -3003.0,
+  "as_of": "2026-09-02",
+  "n_months_scored": 4,
+  "mape_all": 41.5,
+  "mape_recent12": 41.5,
+  "mae_all": 3376.0,
+  "bias_rs": -3376.0,
+  "bias_recent": -3376.0,
   "accuracy_trend": "degrading",
-  "calibration_note": "Model under-predicting by \u20b93003 recently. Actual prices may be higher than forecast."
+  "calibration_note": "Model under-predicting by \u20b93376 recently. Actual prices may be higher than forecast."
 }
